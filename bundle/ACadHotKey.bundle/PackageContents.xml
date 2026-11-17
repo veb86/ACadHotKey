@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Autoloader bundle for AutoCAD 2020 (R23.1) - 2024 (R24.3).
      Copy the ACadHotKey.bundle folder to %APPDATA%\Autodesk\ApplicationPlugins\ (per user)
-     or %PROGRAMDATA%\Autodesk\ApplicationPlugins\ (all users) and put the build output
-     into Contents/2020 and Contents/2021-2024 (experiments/package.sh does this). -->
+     and put the build output into Contents/2020 and Contents/2021-2024
+     (experiments/package.sh does this). No administrator rights are required. -->
 <ApplicationPackage SchemaVersion="1.0"
-                    AppVersion="0.2.0"
+                    AppVersion="0.3.0"
                     ProductCode="{6C1F0E35-9C1A-4E0B-9C55-2F1B7A3C2D11}"
                     Name="ACadHotKey"
                     Description="Single-key hotkeys for the AutoCAD drawing area"

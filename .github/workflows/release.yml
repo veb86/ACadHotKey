@@ -1,0 +1,119 @@
+name: Build and release
+
+on:
+  push:
+    branches: ['**']
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Package (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check version and release tag
+        id: version
+        env:
+          REF_TYPE: ${{ github.ref_type }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          tag=""
+          if [[ "$REF_TYPE" == tag ]]; then tag="$REF_NAME"; fi
+          version="$(python3 experiments/release_package.py --print-version --tag "$tag")"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Test plugin logic
+        run: dotnet test tests/ACadHotKey.Core.Tests -c Release -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 60s
+      - name: Build complete bundle and manual installation ZIP
+        run: |
+          # A stale output from an older layout must not survive repackaging.
+          mkdir -p artifacts/ACadHotKey.bundle/Contents/old
+          echo stale > artifacts/ACadHotKey.bundle/Contents/old/AcMgd.dll
+          bash experiments/package.sh
+          python3 experiments/release_package.py
+      - name: Test bundle, ZIP, checksum and installation in a user profile
+        run: |
+          bash experiments/test-package.sh
+          python3 experiments/test_release_package.py
+      - name: Upload verified release archives
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-archives
+          path: artifacts/release/*
+          if-no-files-found: error
+      - name: Upload build and regression logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-${{ matrix.os }}
+          path: experiments/logs/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  release:
+    name: Publish GitHub release
+    needs: build
+    # Feature branches and pull requests only produce test artifacts.
+    if: >-
+      github.ref_type == 'tag' ||
+      ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+       github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: publish-release
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - name: Check whether this version is already published
+        id: check
+        run: |
+          tags="$(gh api "repos/$GH_REPO/releases" --paginate --jq '.[].tag_name')"
+          if printf '%s\n' "$tags" | grep -Fxq "v$VERSION"; then
+            echo "Release v$VERSION already exists; bump the project and bundle versions for the next release."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/download-artifact@v4
+        if: steps.check.outputs.publish == 'true'
+        with:
+          name: release-archives
+          path: dist
+      - name: Publish verified manual installation archive
+        if: steps.check.outputs.publish == 'true'
+        run: |
+          cd dist
+          sha256sum --check release-manifest.txt
+          gh release create "v$VERSION" "ACadHotKey-manual-install-v$VERSION.zip" release-manifest.txt \
+            --target "$GITHUB_SHA" --title "ACadHotKey $VERSION" --notes-file release-notes.md

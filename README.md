@@ -7,6 +7,8 @@ Autocad перехват клавиш, для настоящих горячих 
 
 * [Исследование: как перехватить клавиши и почему C#](docs/research.md)
 * [Техническое задание](docs/technical-specification.md)
+* [Скачать готовый комплект ручной установки](https://github.com/veb86/ACadHotKey/releases)
+* [Инструкция установки, обновления и удаления](bundle/INSTALL.md)
 
 > Реализация ТЗ на C#. Автоматические проверки и сборка выполняются без AutoCAD.
 > Приёмка внутри AutoCAD 2020–2024 ещё не выполнена: нужен Windows с установленным AutoCAD.
@@ -34,6 +36,8 @@ dotnet test tests/ACadHotKey.Core.Tests -c Release -m:1 --blame-hang-timeout 60s
 bash experiments/build-against-all-autocad-versions.sh
 bash experiments/package.sh
 bash experiments/test-package.sh
+python3 experiments/release_package.py
+python3 experiments/test_release_package.py
 ```
 
 Пакет создаётся в `artifacts/ACadHotKey.bundle`. В него включены две сборки по
@@ -46,15 +50,22 @@ bash experiments/test-package.sh
 
 В каждой папке: `ACadHotKey.dll`, **`ACadHotKey.Core.dll`**, `ACadHotKey.config.xml`.
 Сборки Autodesk не распространяются: их предоставляет AutoCAD. Логи сборок и тестов — `experiments/logs/`.
+Готовый архив: `artifacts/release/ACadHotKey-manual-install-v<версия>.zip`, рядом — SHA256
+в `release-manifest.txt` и текст выпуска `release-notes.md`. Для упаковки нужен Python 3.9+.
 
 ## Установка и работа
 
-1. Собрать пакет командой `bash experiments/package.sh`.
-2. Скопировать **готовую** папку `artifacts/ACadHotKey.bundle` целиком в
-   `%APPDATA%\Autodesk\ApplicationPlugins\` и перезапустить AutoCAD. `PackageContents.xml` выбирает
+1. В [выпусках](https://github.com/veb86/ACadHotKey/releases) скачать
+   **`ACadHotKey-manual-install-v<версия>.zip`**, разблокировать ZIP в свойствах файла, если доступно,
+   и распаковать. Исходники собирать не нужно, инсталлятор и права администратора не требуются.
+2. Закрыть AutoCAD и скопировать папку **`ACadHotKey.bundle` из архива** целиком в
+   `%APPDATA%\Autodesk\ApplicationPlugins\`, создав родительские папки при необходимости.
+   Запустить AutoCAD: `PackageContents.xml` включает автозагрузку и выбирает
    подходящую сборку автоматически, в том числе в вертикальных продуктах.
-3. Для разовой загрузки: `NETLOAD` → `ACadHotKey.dll` из папки своей версии; обе DLL и XML должны
-   оставаться рядом. Если `SECURELOAD` блокирует загрузку, добавить папку модуля в `TRUSTEDPATHS`.
+3. Проверить загрузку командой `ACHK_LIST`. Подробная [инструкция в архиве](bundle/INSTALL.md)
+   содержит точные пути, проверку `APPAUTOLOAD`, доверенных путей, обновление и удаление.
+   Для разовой загрузки: `NETLOAD` → `ACadHotKey.dll` из папки своей версии; обе DLL и XML должны
+   оставаться рядом. Если `SECURELOAD` блокирует загрузку, добавить папку сборки в `TRUSTEDPATHS`.
 4. В чертеже нажать `1`: начинается `LINE`. Нажать `3` во время команды: она отменяется, начинается `CIRCLE`.
    Командная строка, поля палитр и текстовые редакторы принимают клавиши как обычно.
 5. Для своих назначений скопировать XML в `%APPDATA%\ACadHotKey\ACadHotKey.config.xml`, изменить
@@ -72,6 +83,9 @@ bash experiments/test-package.sh
 Ошибка XML сохраняет прежние назначения; сообщение содержит файл и причину. `enabled` задаёт начальное
 состояние при загрузке/перезагрузке, а `ACHK_ON`/`OFF` меняют его до следующей загрузки.
 Для удаления пакета закрыть AutoCAD и удалить папку `ACadHotKey.bundle`.
+При сборке из исходников вместо архива используется готовая папка `artifacts/ACadHotKey.bundle`
+после `bash experiments/package.sh`. Пользовательские настройки в `%APPDATA%\ACadHotKey`
+хранятся отдельно и сохраняются при замене пакета.
 
 ## Команды
 
@@ -86,5 +100,20 @@ bash experiments/test-package.sh
 `ACHK_DIAG`. Файл содержит целевое окно, класс, родителей, `CMDNAMES`, `CMDACTIVE`, запрос и решение.
 Также можно задать `ACADHOTKEY_TRACE=1` до запуска AutoCAD.
 
-В репозитории нет GitHub Actions. Рекомендации по CI:
-https://github.com/link-assistant/hive-mind/blob/main/docs/CI-CD-BEST-PRACTICES.md — добавление остаётся решением владельца.
+## Выпуск новой версии
+
+Workflow [Build and release](.github/workflows/release.yml) собирает обе версии пакета,
+запускает тесты и проверяет ZIP, SHA256 и копирование в тестовый профиль пользователя
+на Linux и Windows. В PR и рабочих ветках готовый ZIP доступен в артефакте `release-archives`.
+
+Для выпуска изменить `<Version>` в `src/ACadHotKey.Plugin/ACadHotKey.Plugin.csproj` и
+`AppVersion` в `bundle/ACadHotKey.bundle/PackageContents.xml` на одну новую версию `X.Y.Z`.
+После слияния в основную ветку workflow автоматически создаёт GitHub Release `vX.Y.Z`
+с архивом ручной установки, SHA256 и инструкцией в тексте выпуска. Уже опубликованная версия
+не перезаписывается: для следующего выпуска нужно повысить версию.
+Также поддерживаются тег `vX.Y.Z` (должен совпадать с версией проекта) и ручной запуск
+`workflow_dispatch` из основной ветки. Публикация требует стандартного `GITHUB_TOKEN`
+с `contents: write` только в задании выпуска; отдельные секреты и установленный AutoCAD не нужны.
+
+Проверка автозагрузки подтверждает структуру пакета по манифесту. Испытания в установленном
+AutoCAD остаются отдельной [проверкой хоста](docs/host-verification.md).
